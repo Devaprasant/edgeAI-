@@ -1,0 +1,158 @@
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Load student data from CSV with error handling
+def load_student_data(file_path):
+    try:
+        return pd.read_csv(file_path)
+    except FileNotFoundError:
+        print(f"Error: File {file_path} not found.")
+        return pd.DataFrame()  # Return empty DataFrame if error occurs
+
+# Load course data from CSV with error handling
+def load_course_data(file_path):
+    try:
+        return pd.read_csv(file_path)
+    except FileNotFoundError:
+        print(f"Error: File {file_path} not found.")
+        return pd.DataFrame()  # Return empty DataFrame if error occurs
+
+# Encode search terms using Label Encoding
+def encode_search_terms(df):
+    if 'search_terms' in df.columns:
+        le = LabelEncoder()
+        df['search_terms_encoded'] = le.fit_transform(df['search_terms'])
+    else:
+        print("Warning: 'search_terms' column not found in the dataset.")
+        df['search_terms_encoded'] = 0  # Assign default value if column is missing
+    return df
+
+# Feature engineering by encoding search terms
+def feature_engineering(df):
+    df = encode_search_terms(df)
+    return df
+
+# Plot confusion matrix for model evaluation
+def plot_confusion_matrix(y_true, y_pred, classes):
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=classes, yticklabels=classes)
+    plt.xlabel('Predicted')
+    plt.ylabel('Actual')
+    plt.title('Confusion Matrix')
+    plt.show()
+
+# Train a Random Forest Classifier with Cross-Validation
+def train_classifier(data):
+    # Check if required columns are available
+    if not all(col in data.columns for col in ['engagement', 'interaction_score', 'search_terms_encoded']):
+        print("Error: Missing required columns in data.")
+        return None, None
+
+    # Features and target
+    X = data[['engagement', 'interaction_score', 'search_terms_encoded']].values
+    y = np.random.randint(0, 3, size=len(X))  # Simulated labels (replace with actual target variable if available)
+
+    # Scale the features for better performance
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    # Initialize Random Forest Classifier
+    classifier = RandomForestClassifier(n_estimators=100, random_state=42)
+
+    # Perform cross-validation to prevent overfitting
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    cv_scores = cross_val_score(classifier, X_scaled, y, cv=skf, scoring='accuracy')
+    print(f"Cross-Validation Accuracy Scores: {cv_scores}")
+    print(f"Mean Cross-Validation Accuracy: {np.mean(cv_scores):.2f}")
+
+    # Train the classifier on the entire dataset after cross-validation
+    classifier.fit(X_scaled, y)
+
+    # Predict on training data to evaluate
+    y_pred = classifier.predict(X_scaled)
+
+    # Calculate and display accuracy
+    acc = accuracy_score(y, y_pred)
+    print(f"Training Accuracy: {acc:.2f}")
+
+    # Determine unique classes dynamically
+    unique_classes = np.unique(y)
+    target_names = [f"Interest {i+1}" for i in unique_classes]
+
+    # Display classification report and confusion matrix
+    print("\nClassification Report:")
+    print(classification_report(y, y_pred, target_names=target_names))
+    plot_confusion_matrix(y, y_pred, classes=target_names)
+
+    return classifier, scaler
+
+# Generate course recommendations based on predicted interests
+def recommend_courses(predicted_interest, courses):
+    # Filter courses based on predicted difficulty level
+    cluster_courses = courses[courses['difficulty'] == predicted_interest + 1]
+    return cluster_courses
+
+# Real-time processing loop for data loading, processing, model training, and recommendations
+def real_time_loop(student_data_file, course_data_file):
+    # Load student and course data with error handling
+    student_data = load_student_data(student_data_file)
+    courses = load_course_data(course_data_file)
+
+    # Check if data loading was successful
+    if student_data.empty or courses.empty:
+        print("Error: Unable to load data. Please check your file paths.")
+        return
+
+    # Process the data through feature engineering
+    processed_data = feature_engineering(student_data)
+
+    # Train the classifier model
+    classifier, scaler = train_classifier(processed_data)
+
+    # Check if model training was successful
+    if classifier is None:
+        print("Error: Model training failed.")
+        return
+
+    # Convert data for model inference
+    X_new = processed_data[['engagement', 'interaction_score', 'search_terms_encoded']].values
+    X_new_scaled = scaler.transform(X_new)
+
+    # Predict student interests using the trained classifier
+    predicted_interests = classifier.predict(X_new_scaled)
+
+    # Add predicted interests to the processed data
+    processed_data['predicted_interest'] = predicted_interests
+
+    # Generate and display recommendations for each student
+    recommendations = {}
+    for _, student in processed_data.iterrows():
+        student_id = student['student_id']
+        recommended_courses = recommend_courses(student['predicted_interest'], courses)
+        recommendations[student_id] = recommended_courses
+
+    # Print personalized recommendations for each student
+    for student_id, recommended_courses in recommendations.items():
+        student_name = processed_data.loc[processed_data['student_id'] == student_id, 'name'].values[0]
+        print(f"Recommendations for {student_name}:")
+        if recommended_courses.empty:
+            print("No courses available based on your interests.")
+        else:
+            print("Based on your interests, we recommend the following courses:")
+            print(", ".join(recommended_courses['course_name'].values))
+        print()
+
+# Run real-time simulation with specified CSV file paths
+if __name__ == "__main__":
+    # Provide paths to your CSV files
+    student_data_file ="/content/drive/MyDrive/Colab Notebooks/1extended_student_dataset.csv"
+    course_data_file = "/content/drive/MyDrive/Colab Notebooks/1extended_course_dataset (1).csv"
+
+    real_time_loop(student_data_file, course_data_file)
